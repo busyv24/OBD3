@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>OBD2 Diagnostic — 3D Engine View</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/three@0.160/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160/examples/js/controls/OrbitControls.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #090c10;
+    --bg2:      #0e1218;
+    --bg3:      #131920;
+    --panel:    #111820;
+    --border:   #1e2d3d;
+    --border2:  #2a3d50;
+    --text:     #c8d8e8;
+    --text2:    #6a8aaa;
+    --accent:   #00d4ff;
+    --accent2:  #0090bb;
+    --warn:     #ff6b35;
+    --danger:   #ff2d55;
+    --ok:       #00e676;
+    --low:      #ffd700;
+    --critical: #ff2d55;
+    --high:     #ff6b35;
+    --medium:   #ffd700;
+    --font:     'Rajdhani', sans-serif;
+    --mono:     'IBM Plex Mono', monospace;
+    --r:        6px;
+  }
+
+  html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); }
+
+  /* ── Layout ── */
+  #app { display: grid; grid-template-columns: 300px 1fr 280px; grid-template-rows: 56px 1fr; height: 100vh; gap: 0; }
+
+  /* ── Top bar ── */
+  #topbar {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 20px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+  .logo { font-size: 20px; font-weight: 700; letter-spacing: 3px; color: var(--accent); text-transform: uppercase; }
+  .logo span { color: var(--text2); font-weight: 400; }
+  #status-pill {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 14px; border-radius: 20px;
+    border: 1px solid var(--border2);
+    font-family: var(--mono); font-size: 11px; color: var(--text2);
+    transition: all .3s;
+  }
+  #status-pill.connected { border-color: var(--ok); color: var(--ok); }
+  #status-pill.demo { border-color: var(--accent); color: var(--accent); }
+  #status-pill.error { border-color: var(--danger); color: var(--danger); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  #vin-display { font-family: var(--mono); font-size: 12px; color: var(--text2); margin-left: auto; letter-spacing: 2px; }
+  #demo-badge {
+    font-family: var(--mono); font-size: 10px; padding: 3px 10px; border-radius: 3px;
+    background: rgba(0,212,255,.1); border: 1px solid rgba(0,212,255,.3); color: var(--accent);
+    letter-spacing: 1px; display: none;
+  }
+
+  /* ── Left panel ── */
+  #left-panel {
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .section-label { font-size: 10px; letter-spacing: 3px; color: var(--text2); text-transform: uppercase; margin-bottom: 10px; font-family: var(--mono); }
+
+  /* Vehicle info */
+  #vehicle-make { font-size: 22px; font-weight: 700; color: var(--text); line-height: 1; }
+  #vehicle-model { font-size: 14px; color: var(--text2); margin-top: 2px; }
+  #vehicle-year { font-size: 13px; color: var(--accent); font-family: var(--mono); margin-top: 4px; }
+
+  /* Gauges */
+  .gauge-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .gauge {
+    background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r);
+    padding: 10px 12px; cursor: default;
+  }
+  .gauge-label { font-size: 10px; color: var(--text2); letter-spacing: 1px; text-transform: uppercase; font-family: var(--mono); }
+  .gauge-value { font-size: 20px; font-weight: 700; color: var(--text); line-height: 1.1; margin-top: 2px; font-family: var(--mono); }
+  .gauge-unit { font-size: 10px; color: var(--text2); }
+  .gauge-bar { height: 3px; background: var(--border); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  .gauge-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width .3s; }
+  .gauge-fill.warn { background: var(--warn); }
+  .gauge-fill.danger { background: var(--danger); }
+
+  /* DTC list */
+  #dtc-list-container { flex: 1; overflow-y: auto; padding: 10px 12px; }
+  #dtc-list-container::-webkit-scrollbar { width: 4px; }
+  #dtc-list-container::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  .dtc-card {
+    background: var(--bg3); border-radius: var(--r); padding: 10px 12px; margin-bottom: 8px;
+    border-left: 3px solid var(--medium); cursor: pointer; transition: all .2s;
+    border-top: 1px solid var(--border); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  }
+  .dtc-card:hover { background: #1a2535; transform: translateX(2px); }
+  .dtc-card.active { background: #1a2535; border-left-color: var(--accent) !important; }
+  .dtc-card[data-severity="critical"] { border-left-color: var(--critical); }
+  .dtc-card[data-severity="high"]     { border-left-color: var(--high); }
+  .dtc-card[data-severity="medium"]   { border-left-color: var(--medium); }
+  .dtc-card[data-severity="low"]      { border-left-color: var(--ok); }
+  .dtc-code { font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--accent); }
+  .dtc-part { font-size: 13px; color: var(--text); margin-top: 2px; }
+  .dtc-severity-badge {
+    display: inline-block; font-size: 9px; font-family: var(--mono); letter-spacing: 1px;
+    padding: 2px 6px; border-radius: 2px; text-transform: uppercase; margin-top: 4px;
+  }
+  .sev-critical { background: rgba(255,45,85,.15); color: var(--critical); border: 1px solid rgba(255,45,85,.3); }
+  .sev-high     { background: rgba(255,107,53,.15); color: var(--high);     border: 1px solid rgba(255,107,53,.3); }
+  .sev-medium   { background: rgba(255,215,0,.12);  color: var(--low);      border: 1px solid rgba(255,215,0,.3);  }
+  .sev-low      { background: rgba(0,230,118,.1);   color: var(--ok);       border: 1px solid rgba(0,230,118,.3);  }
+
+  .no-dtc { text-align: center; padding: 30px 0; color: var(--text2); font-size: 13px; }
+  .no-dtc-icon { font-size: 32px; display: block; margin-bottom: 8px; opacity: .4; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 14px; border-radius: var(--r); border: 1px solid var(--border2);
+    background: transparent; color: var(--text); font-family: var(--font); font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: all .2s; letter-spacing: .5px;
+  }
+  .btn:hover { background: var(--border); }
+  .btn.primary { background: var(--accent2); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: var(--accent); }
+  .btn.danger-btn { border-color: rgba(255,45,85,.4); color: var(--danger); }
+  .btn.danger-btn:hover { background: rgba(255,45,85,.1); }
+  .btn-row { display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+
+  /* ── 3D viewport ── */
+  #viewport { position: relative; background: var(--bg); overflow: hidden; }
+  #three-canvas { display: block; width: 100%; height: 100%; }
+
+  /* Crosshair */
+  #crosshair {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    width: 20px; height: 20px; pointer-events: none; opacity: .15;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ''; position: absolute; background: var(--accent);
+  }
+  #crosshair::before { width: 1px; height: 100%; left: 50%; }
+  #crosshair::after  { width: 100%; height: 1px; top: 50%; }
+
+  /* Scan overlay */
+  #scan-overlay {
+    position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,212,255,.012) 3px, rgba(0,212,255,.012) 4px);
+    opacity: 0; transition: opacity .5s;
+  }
+  #scan-overlay.active { opacity: 1; }
+
+  /* Part label tooltip */
+  #part-tooltip {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: rgba(9,12,16,.92); border: 1px solid var(--accent); border-radius: var(--r);
+    padding: 10px 20px; text-align: center; pointer-events: none;
+    opacity: 0; transition: opacity .3s; backdrop-filter: blur(8px);
+    white-space: nowrap;
+  }
+  #part-tooltip.show { opacity: 1; }
+  #part-tooltip .pt-code { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: 2px; }
+  #part-tooltip .pt-name { font-size: 16px; font-weight: 700; color: var(--text); margin-top: 2px; }
+
+  /* Viewport overlay controls */
+  #view-controls {
+    position: absolute; top: 14px; right: 14px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .view-btn {
+    width: 36px; height: 36px; border-radius: var(--r);
+    background: rgba(9,12,16,.8); border: 1px solid var(--border2);
+    color: var(--text2); font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all .2s; backdrop-filter: blur(4px); font-family: var(--mono);
+  }
+  .view-btn:hover { background: var(--border); color: var(--text); border-color: var(--accent); }
+
+  /* Loading screen */
+  #loading {
+    position: absolute; inset: 0; background: var(--bg);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; z-index: 100;
+  }
+  .loading-ring {
+    width: 60px; height: 60px; border-radius: 50%;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text { font-family: var(--mono); font-size: 12px; color: var(--text2); letter-spacing: 2px; }
+
+  /* ── Right panel ── */
+  #right-panel {
+    background: var(--panel);
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  /* Repair info card */
+  #repair-card {
+    padding: 16px; border-bottom: 1px solid var(--border);
+    transition: all .3s;
+  }
+  #repair-card.hidden { opacity: .4; }
+  .repair-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .repair-label { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; font-family: var(--mono); }
+  .repair-val { font-size: 14px; font-weight: 600; color: var(--text); font-family: var(--mono); }
+  .repair-val.cost { color: var(--warn); }
+  .diy-yes { color: var(--ok); }
+  .diy-no  { color: var(--danger); }
+
+  /* Part 3D location diagram */
+  #location-diagram { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  #loc-svg { width: 100%; height: 120px; }
+
+  /* DTC description */
+  #dtc-description { flex: 1; padding: 14px 16px; overflow-y: auto; }
+  .desc-heading { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 2px; font-family: var(--mono); margin-bottom: 8px; }
+  #desc-text { font-size: 13px; color: var(--text); line-height: 1.6; }
+
+  /* Demo inject panel */
+  #demo-panel { padding: 12px 16px; border-top: 1px solid var(--border); }
+  .inject-grid { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+  .inject-btn {
+    font-family: var(--mono); font-size: 10px; padding: 4px 8px; border-radius: 3px;
+    border: 1px solid var(--border2); background: var(--bg3); color: var(--text2); cursor: pointer; transition: all .15s;
+  }
+  .inject-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Notification toast */
+  #toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--bg2); border: 1px solid var(--accent); border-radius: var(--r);
+    padding: 10px 20px; font-family: var(--mono); font-size: 12px; color: var(--accent);
+    letter-spacing: 1px; z-index: 999; opacity: 0; transition: opacity .3s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+
+  /* Grid scanlines for viewport */
+  #grid-overlay {
+    position: absolute; inset: 0; pointer-events: none; opacity: .04;
+    background-image: linear-gradient(var(--accent) 1px, transparent 1px),
+                      linear-gradient(90deg, var(--accent) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  .connect-screen {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px; z-index: 50;
+    background: var(--bg);
+  }
+  .connect-title { font-size: 28px; font-weight: 700; color: var(--text); letter-spacing: 2px; }
+  .connect-sub { font-size: 13px; color: var(--text2); font-family: var(--mono); }
+  .connect-icon { font-size: 56px; opacity: .3; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Top bar -->
+  <header id="topbar">
+    <div class="logo">OBD2 <span>/</span> 3D DIAG</div>
+    <div id="status-pill">
+      <span class="dot"></span>
+      <span id="status-text">Disconnected</span>
+    </div>
+    <div id="demo-badge">DEMO MODE</div>
+    <div id="vin-display">—</div>
+  </header>
+
+  <!-- Left panel -->
+  <aside id="left-panel">
+    <div class="panel-section">
+      <div class="section-label">Vehicle</div>
+      <div id="vehicle-make">—</div>
+      <div id="vehicle-model">—</div>
+      <div id="vehicle-year">—</div>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-label">Live Data</div>
+      <div class="gauge-row">
+        <div class="gauge">
+          <div class="gauge-label">RPM</div>
+          <div class="gauge-value"><span id="g-rpm">—</span><span class="gauge-unit"> rpm</span></div>
+          <div class="gauge-bar"><div class="gauge-fill" id="b-rpm" style="width:0%"></div></div>
+        </div>
+        <div class="gauge">
+          <div class="gauge-label">Speed</div>
+          <div class="gauge-value"><span id="g-speed">—</span><span class="gauge-unit"> mph</span></div>
+          <div class="gauge-bar"><div class="gauge-fill" id="b-speed" style="width:0%"></div></div>
+        </div>
+        <div class="gauge">
+          <div class="gauge-label">Coolant</div>
+          <div class="gauge-value"><span id="g-coolant">—</span><span class="gauge-unit"> °C</span></div>
+          <div class="gauge-bar"><div class="gauge-fill" id="b-coolant" style="width:0%"></div></div>
+        </div>
+        <div class="gauge">
+          <div class="gauge-label">Throttle</div>
+          <div class="gauge-value"><span id="g-throttle">—</span><span class="gauge-unit"> %</span></div>
+          <div class="gauge-bar"><div class="gauge-fill" id="b-throttle" style="width:0%"></div></div>
+        </div>
+        <div class="gauge">
+          <div class="gauge-label">Battery</div>
+          <div class="gauge-value"><span id="g-voltage">—</span><span class="gauge-unit"> V</span></div>
+          <div class="gauge-bar"><div class="gauge-fill" id="b-voltage" style="width:0%"></div></div>
+        </div>
+        <div class="gauge">
+          <div class="gauge-label">Fuel</div>
+          <div class="gauge-value"><span id="g-fuel">—</span><span class="gauge-unit"> %</span></div>
+          <div class="gauge-bar"><div class="gauge-fill" id="b-fuel" style="width:0%"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-section" style="flex-shrink:0">
+      <div class="section-label">Fault Codes <span id="dtc-count" style="color:var(--accent)"></span></div>
+    </div>
+    <div id="dtc-list-container">
+      <div class="no-dtc" id="no-dtc-msg">
+        <span class="no-dtc-icon">✓</span>
+        No fault codes detected
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn primary" onclick="connectCar()">⚡ Connect</button>
+      <button class="btn danger-btn" onclick="clearDTCs()">Clear DTCs</button>
+    </div>
+  </aside>
+
+  <!-- 3D Viewport -->
+  <main id="viewport">
+    <div id="grid-overlay"></div>
+    <div id="scan-overlay"></div>
+    <canvas id="three-canvas"></canvas>
+    <div id="crosshair"></div>
+
+    <div id="view-controls">
+      <button class="view-btn" title="Reset view" onclick="resetCamera()">⌖</button>
+      <button class="view-btn" title="Toggle wireframe" onclick="toggleWireframe()">⬡</button>
+      <button class="view-btn" title="Explode view" onclick="toggleExplode()">✦</button>
+      <button class="view-btn" title="Show all parts" onclick="showAll()">◉</button>
+    </div>
+
+    <div id="part-tooltip">
+      <div class="pt-code" id="tt-code"></div>
+      <div class="pt-name" id="tt-name"></div>
+    </div>
+
+    <div id="loading">
+      <div class="loading-ring"></div>
+      <div class="loading-text">INITIALIZING ENGINE MODEL</div>
+    </div>
+
+    <div class="connect-screen" id="connect-screen">
+      <div class="connect-icon">🔌</div>
+      <div class="connect-title">OBD2 DIAGNOSTIC</div>
+      <div class="connect-sub">Connect your OBD2 adapter and click Connect</div>
+      <button class="btn primary" style="margin-top:8px" onclick="connectCar()">⚡ Connect to Vehicle</button>
+      <div style="font-size:11px;color:var(--text2);font-family:var(--mono);margin-top:8px;">No adapter? Runs in demo mode automatically</div>
+    </div>
+  </main>
+
+  <!-- Right panel -->
+  <aside id="right-panel">
+    <div class="panel-section">
+      <div class="section-label">Selected Fault</div>
+      <div id="selected-code" style="font-family:var(--mono);font-size:22px;font-weight:500;color:var(--accent)">—</div>
+      <div id="selected-part" style="font-size:14px;color:var(--text);margin-top:4px">Select a fault code</div>
+    </div>
+
+    <div id="repair-card" class="hidden">
+      <div class="section-label">Repair Info</div>
+      <div class="repair-row">
+        <span class="repair-label">Est. Cost</span>
+        <span class="repair-val cost" id="ri-cost">—</span>
+      </div>
+      <div class="repair-row">
+        <span class="repair-label">DIY Possible</span>
+        <span class="repair-val" id="ri-diy">—</span>
+      </div>
+      <div class="repair-row">
+        <span class="repair-label">Time</span>
+        <span class="repair-val" id="ri-time">—</span>
+      </div>
+    </div>
+
+    <div id="location-diagram">
+      <div class="section-label">Part Location</div>
+      <svg id="loc-svg" viewBox="0 0 240 120">
+        <!-- Simple car silhouette schematic -->
+        <!-- Body -->
+        <rect x="20" y="55" width="200" height="40" rx="8" fill="none" stroke="#1e2d3d" stroke-width="1.5"/>
+        <!-- Roof -->
+        <path d="M60 55 Q80 25 160 25 Q180 25 200 55" fill="none" stroke="#1e2d3d" stroke-width="1.5"/>
+        <!-- Wheels -->
+        <circle cx="60"  cy="95" r="14" fill="none" stroke="#1e2d3d" stroke-width="1.5"/>
+        <circle cx="180" cy="95" r="14" fill="none" stroke="#1e2d3d" stroke-width="1.5"/>
+        <!-- Engine bay marker -->
+        <rect id="loc-engine" x="22" y="57" width="55" height="36" rx="4" fill="none" stroke="transparent" stroke-width="1.5"/>
+        <!-- Exhaust marker -->
+        <rect id="loc-exhaust" x="155" y="70" width="60" height="18" rx="3" fill="none" stroke="transparent" stroke-width="1.5"/>
+        <!-- Sensor dot -->
+        <circle id="loc-dot" cx="-99" cy="-99" r="5" fill="var(--accent)" opacity="0">
+          <animate attributeName="opacity" values="1;0.3;1" dur="1.5s" repeatCount="indefinite"/>
+        </circle>
+        <text id="loc-label" x="120" y="115" text-anchor="middle" font-family="'IBM Plex Mono'" font-size="9" fill="#6a8aaa">Select a fault code</text>
+      </svg>
+    </div>
+
+    <div id="dtc-description">
+      <div class="desc-heading">About This Code</div>
+      <div id="desc-text" style="color:var(--text2);font-size:13px">Select a fault code from the left panel to see details and highlight the affected component in the 3D view.</div>
+    </div>
+
+    <div id="demo-panel">
+      <div class="section-label" style="margin-bottom:6px">Inject Test DTC</div>
+      <div class="inject-grid" id="inject-grid"></div>
+    </div>
+  </aside>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ════════════════════════════════════════
+//  State
+// ════════════════════════════════════════
+let scene, camera, renderer, controls, animId;
+let engineModel = null;
+let partMeshes  = {};
+let originalMaterials = {};
+let isConnected = false;
+let ws = null;
+let activeDTCs = [];
+let selectedDTC = null;
+let exploded = false;
+let explodeOffsets = {};
+let wireframeOn = false;
+
+// ════════════════════════════════════════
+//  Three.js setup
+// ════════════════════════════════════════
+function initThree() {
+  const canvas = document.getElementById('three-canvas');
+  const vp = document.getElementById('viewport');
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x090c10);
+  scene.fog = new THREE.Fog(0x090c10, 12, 30);
+
+  camera = new THREE.PerspectiveCamera(45, vp.clientWidth / vp.clientHeight, 0.01, 100);
+  camera.position.set(0, 1.8, 4.5);
+
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(vp.clientWidth, vp.clientHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.1;
+
+  // Lights
+  const ambient = new THREE.AmbientLight(0x203050, 1.5);
+  scene.add(ambient);
+  const key = new THREE.DirectionalLight(0x80c8ff, 2);
+  key.position.set(3, 5, 4);
+  key.castShadow = true;
+  scene.add(key);
+  const fill = new THREE.DirectionalLight(0x4060a0, 0.8);
+  fill.position.set(-3, 2, -3);
+  scene.add(fill);
+  const rim = new THREE.DirectionalLight(0x00d4ff, 0.4);
+  rim.position.set(0, -2, -5);
+  scene.add(rim);
+
+  // Grid
+  const grid = new THREE.GridHelper(20, 40, 0x1e2d3d, 0x1e2d3d);
+  grid.position.y = -0.8;
+  scene.add(grid);
+
+  controls = new THREE.OrbitControls(camera, canvas);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.minDistance = 1;
+  controls.maxDistance = 12;
+  controls.target.set(0, 0.5, 0);
+
+  window.addEventListener('resize', onResize);
+
+  buildProceduralEngine();
+  animate();
+}
+
+// ════════════════════════════════════════
+//  Procedural engine model
+//  (no external GLB needed — runs immediately)
+// ════════════════════════════════════════
+const PARTS_DEF = [
+  { name:"Engine_Block",         pos:[0,0,0],           size:[1.4,0.9,1.8],  color:0x2a3a4a, label:"Engine Block"             },
+  { name:"Crankshaft_Sensor",    pos:[0.71,0.1,0.4],    size:[0.12,0.2,0.15], color:0x334455, label:"Crankshaft Sensor"        },
+  { name:"Camshaft_Sensor",      pos:[0,0.46,0.5],      size:[0.14,0.12,0.14],color:0x334455, label:"Camshaft Sensor"          },
+  { name:"Throttle_Body",        pos:[0,0.65,0.6],      size:[0.5,0.35,0.4],  color:0x2e4060, label:"Throttle Body"            },
+  { name:"MAF_Sensor",           pos:[0,0.72,1.1],      size:[0.18,0.22,0.35],color:0x334455, label:"Mass Airflow Sensor"      },
+  { name:"Fuel_Injector",        pos:[0.55,0.3,0],      size:[0.1,0.45,0.6],  color:0x2d4558, label:"Fuel Injectors"           },
+  { name:"Catalytic_Converter",  pos:[0,-0.3,-1.2],     size:[0.5,0.4,0.9],   color:0x3a3520, label:"Catalytic Converter"      },
+  { name:"O2_Sensor_Front",      pos:[0.26,-0.25,-0.75],size:[0.1,0.1,0.2],   color:0x334444, label:"O₂ Sensor (Front)"        },
+  { name:"O2_Sensor_Rear",       pos:[0.26,-0.25,-1.65],size:[0.1,0.1,0.2],   color:0x334444, label:"O₂ Sensor (Rear)"         },
+  { name:"EGR_Valve",            pos:[-0.72,0.25,0.1],  size:[0.22,0.28,0.22],color:0x353525, label:"EGR Valve"                },
+  { name:"Coolant_Temp_Sensor",  pos:[-0.55,0.45,-0.3], size:[0.1,0.16,0.1],  color:0x334455, label:"Coolant Temp Sensor"      },
+];
+
+function buildProceduralEngine() {
+  partMeshes = {};
+  originalMaterials = {};
+  explodeOffsets = {};
+
+  const group = new THREE.Group();
+
+  PARTS_DEF.forEach(def => {
+    const geo = new THREE.BoxGeometry(...def.size);
+    geo.translate(0, def.size[1] / 2, 0); // origin at bottom
+
+    // Bevel-like look with slight edge rounding via scale
+    const mat = new THREE.MeshStandardMaterial({
+      color: def.color,
+      metalness: 0.6,
+      roughness: 0.5,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(...def.pos);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.name = def.name;
+    mesh.userData = { label: def.label, basePos: [...def.pos] };
+
+    // Edge lines
+    const edges = new THREE.EdgesGeometry(geo, 15);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x3a5570, linewidth: 1 });
+    const lines = new THREE.LineSegments(edges, lineMat);
+    mesh.add(lines);
+
+    group.add(mesh);
+    partMeshes[def.name] = mesh;
+    originalMaterials[def.name] = mat;
+    explodeOffsets[def.name] = [def.pos[0] * 0.8, def.pos[1] * 0.8, def.pos[2] * 0.8];
+  });
+
+  engineModel = group;
+  scene.add(group);
+  document.getElementById('loading').style.display = 'none';
+}
+
+// ════════════════════════════════════════
+//  Animation loop
+// ════════════════════════════════════════
+function animate() {
+  animId = requestAnimationFrame(animate);
+  controls.update();
+  // Slow auto-rotate when nothing selected
+  if (!selectedDTC && engineModel) {
+    engineModel.rotation.y += 0.002;
+  }
+  renderer.render(scene, camera);
+}
+
+function onResize() {
+  const vp = document.getElementById('viewport');
+  camera.aspect = vp.clientWidth / vp.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(vp.clientWidth, vp.clientHeight);
+}
+
+// ════════════════════════════════════════
+//  Part highlighting
+// ════════════════════════════════════════
+const SEV_COLORS = {
+  critical: 0xff2d55,
+  high:     0xff6b35,
+  medium:   0xffd700,
+  low:      0x00e676,
+};
+const EMISSIVE = {
+  critical: 0xff0033,
+  high:     0xff4400,
+  medium:   0xcc9900,
+  low:      0x00aa44,
+};
+
+function highlightPart(partName, severity = 'high') {
+  if (!engineModel) return;
+  engineModel.rotation.y = 0; // stop spinning
+
+  scene.traverse(obj => {
+    if (!obj.isMesh || !partMeshes[obj.name]) return;
+    const mat = obj.material;
+    if (obj.name === partName) {
+      mat.color.setHex(SEV_COLORS[severity] || 0xff4400);
+      mat.emissive.setHex(EMISSIVE[severity] || 0xff2200);
+      mat.emissiveIntensity = 0.8;
+      mat.opacity = 1.0;
+      mat.transparent = false;
+    } else {
+      mat.color.setHex(PARTS_DEF.find(p => p.name === obj.name)?.color || 0x334455);
+      mat.emissive.setHex(0x000000);
+      mat.emissiveIntensity = 0;
+      mat.transparent = true;
+      mat.opacity = 0.12;
+    }
+  });
+
+  // Fly camera to part
+  const mesh = partMeshes[partName];
+  if (mesh) flyTo(mesh);
+}
+
+function showAll() {
+  selectedDTC = null;
+  if (!engineModel) return;
+  engineModel.rotation.y = 0;
+  scene.traverse(obj => {
+    if (!obj.isMesh || !partMeshes[obj.name]) return;
+    const def = PARTS_DEF.find(p => p.name === obj.name);
+    obj.material.color.setHex(def?.color || 0x334455);
+    obj.material.emissive.setHex(0x000000);
+    obj.material.emissiveIntensity = 0;
+    obj.material.transparent = false;
+    obj.material.opacity = 1.0;
+  });
+  document.querySelectorAll('.dtc-card').forEach(c => c.classList.remove('active'));
+  document.getElementById('part-tooltip').classList.remove('show');
+  resetCamera();
+}
+
+function flyTo(mesh) {
+  const box = new THREE.Box3().setFromObject(mesh);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3()).length();
+  const offset = Math.max(size * 3, 2.5);
+
+  // Animate
+  const startPos = camera.position.clone();
+  const endPos = center.clone().add(new THREE.Vector3(offset * 0.7, offset * 0.5, offset));
+  let t = 0;
+  const fly = () => {
+    t = Math.min(t + 0.025, 1);
+    const e = t < 0.5 ? 2*t*t : -1+(4-2*t)*t; // ease in-out
+    camera.position.lerpVectors(startPos, endPos, e);
+    controls.target.lerp(center, e);
+    controls.update();
+    if (t < 1) requestAnimationFrame(fly);
+  };
+  fly();
+
+  // Show tooltip
+  const dtc = activeDTCs.find(d => d.part === mesh.name);
+  if (dtc) {
+    document.getElementById('tt-code').textContent = dtc.code;
+    document.getElementById('tt-name').textContent = dtc.label;
+    document.getElementById('part-tooltip').classList.add('show');
+  }
+}
+
+function resetCamera() {
+  camera.position.set(0, 1.8, 4.5);
+  controls.target.set(0, 0.5, 0);
+  controls.update();
+  document.getElementById('part-tooltip').classList.remove('show');
+}
+
+function toggleWireframe() {
+  wireframeOn = !wireframeOn;
+  scene.traverse(obj => {
+    if (obj.isMesh) obj.material.wireframe = wireframeOn;
+  });
+}
+
+function toggleExplode() {
+  exploded = !exploded;
+  scene.traverse(obj => {
+    if (!obj.isMesh || !partMeshes[obj.name]) return;
+    const def = PARTS_DEF.find(p => p.name === obj.name);
+    if (!def) return;
+    const [bx, by, bz] = def.pos;
+    const target = exploded
+      ? new THREE.Vector3(bx * 2.2, by * 2.2, bz * 2.2)
+      : new THREE.Vector3(bx, by, bz);
+    let t = 0;
+    const from = obj.position.clone();
+    const anim = () => {
+      t = Math.min(t + 0.04, 1);
+      const e = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
+      obj.position.lerpVectors(from, target, e);
+      if (t < 1) requestAnimationFrame(anim);
+    };
+    anim();
+  });
+  toast(exploded ? 'Exploded view' : 'Collapsed view');
+}
+
+// ════════════════════════════════════════
+//  API / WebSocket
+// ════════════════════════════════════════
+async function connectCar() {
+  setStatus('connecting', 'Connecting…');
+  document.getElementById('scan-overlay').classList.add('active');
+  try {
+    const r = await fetch('/api/connect', { method: 'POST' });
+    const data = await r.json();
+    if (data.status === 'connected') {
+      isConnected = true;
+      document.getElementById('connect-screen').style.display = 'none';
+      setStatus(data.demo ? 'demo' : 'connected', data.demo ? 'Demo Mode' : 'Connected');
+      if (data.demo) document.getElementById('demo-badge').style.display = 'block';
+      document.getElementById('vin-display').textContent = data.vin || '—';
+      updateVehicle(data.vehicle);
+      updateDTCs(data.dtcs || []);
+      startWebSocket();
+    } else {
+      setStatus('error', 'Error');
+      toast('Connection failed: ' + (data.message || 'Unknown error'));
+    }
+  } catch(e) {
+    setStatus('error', 'Error');
+    toast('Server error — is server.py running?');
+  }
+  document.getElementById('scan-overlay').classList.remove('active');
+}
+
+function startWebSocket() {
+  if (ws) ws.close();
+  ws = new WebSocket(`ws://${location.host}/ws/live`);
+  ws.onmessage = e => {
+    const d = JSON.parse(e.data);
+    updateGauges(d);
+    if (d.dtcs && JSON.stringify(d.dtcs) !== JSON.stringify(activeDTCs)) {
+      updateDTCs(d.dtcs);
+    }
+  };
+  ws.onclose = () => { if (isConnected) setTimeout(startWebSocket, 2000); };
+}
+
+async function clearDTCs() {
+  await fetch('/api/clear_dtcs', { method: 'POST' });
+  activeDTCs = [];
+  updateDTCs([]);
+  showAll();
+  toast('Fault codes cleared');
+}
+
+// ════════════════════════════════════════
+//  UI updates
+// ════════════════════════════════════════
+function setStatus(state, text) {
+  const pill = document.getElementById('status-pill');
+  pill.className = 'status-pill ' + state;
+  document.getElementById('status-text').textContent = text;
+}
+
+function updateVehicle(v) {
+  if (!v) return;
+  document.getElementById('vehicle-make').textContent  = v.make  || '—';
+  document.getElementById('vehicle-model').textContent = v.model || '—';
+  document.getElementById('vehicle-year').textContent  = v.year  || '—';
+}
+
+function updateGauges(d) {
+  const set = (id, val, max, warnThresh, dangerThresh) => {
+    document.getElementById('g-' + id).textContent = val;
+    const pct = Math.min((val / max) * 100, 100);
+    const bar = document.getElementById('b-' + id);
+    bar.style.width = pct + '%';
+    bar.className = 'gauge-fill' + (val >= dangerThresh ? ' danger' : val >= warnThresh ? ' warn' : '');
+  };
+  if (d.rpm     !== undefined) set('rpm',     d.rpm,      8000, 5500, 7000);
+  if (d.speed   !== undefined) set('speed',   d.speed,    160,  100,  140);
+  if (d.coolant !== undefined) set('coolant', d.coolant,  130,   90,  110);
+  if (d.throttle!== undefined) set('throttle',d.throttle, 100,   80,   95);
+  if (d.voltage !== undefined) set('voltage', d.voltage,   16,   14.5, 15.5);
+  if (d.fuel_level!==undefined)set('fuel',   d.fuel_level,100,   20,   10);
+}
+
+function updateDTCs(dtcs) {
+  activeDTCs = dtcs;
+  const container = document.getElementById('dtc-list-container');
+  const noMsg = document.getElementById('no-dtc-msg');
+  document.getElementById('dtc-count').textContent = dtcs.length ? `(${dtcs.length})` : '';
+
+  // Remove old cards
+  container.querySelectorAll('.dtc-card').forEach(c => c.remove());
+
+  if (!dtcs.length) {
+    noMsg.style.display = 'block';
+    showAll();
+    return;
+  }
+  noMsg.style.display = 'none';
+
+  dtcs.forEach(dtc => {
+    const card = document.createElement('div');
+    card.className = 'dtc-card';
+    card.dataset.severity = dtc.severity;
+    card.dataset.code = dtc.code;
+    card.innerHTML = `
+      <div class="dtc-code">${dtc.code}</div>
+      <div class="dtc-part">${dtc.label}</div>
+      <span class="dtc-severity-badge sev-${dtc.severity}">${dtc.severity}</span>
+    `;
+    card.onclick = () => selectDTC(dtc, card);
+    container.appendChild(card);
+  });
+
+  // Auto-select most severe
+  const order = ['critical','high','medium','low'];
+  const worst = dtcs.sort((a,b) => order.indexOf(a.severity) - order.indexOf(b.severity))[0];
+  if (worst) {
+    const card = container.querySelector(`[data-code="${worst.code}"]`);
+    selectDTC(worst, card);
+  }
+}
+
+function selectDTC(dtc, cardEl) {
+  selectedDTC = dtc;
+  document.querySelectorAll('.dtc-card').forEach(c => c.classList.remove('active'));
+  if (cardEl) cardEl.classList.add('active');
+
+  // Right panel
+  document.getElementById('selected-code').textContent = dtc.code;
+  document.getElementById('selected-part').textContent = dtc.label;
+
+  const rc = document.getElementById('repair-card');
+  rc.classList.remove('hidden');
+  document.getElementById('ri-cost').textContent = dtc.repair_cost || 'N/A';
+  document.getElementById('ri-diy').textContent  = dtc.diy ? '✓ Yes' : '✗ No';
+  document.getElementById('ri-diy').className = 'repair-val ' + (dtc.diy ? 'diy-yes' : 'diy-no');
+  document.getElementById('ri-time').textContent = dtc.repair_time || 'N/A';
+
+  // Description
+  const desc = getDTCDescription(dtc.code);
+  document.getElementById('desc-text').textContent = desc;
+
+  // Location diagram
+  updateLocationDot(dtc.part);
+
+  // 3D highlight
+  highlightPart(dtc.part, dtc.severity);
+}
+
+function getDTCDescription(code) {
+  const map = {
+    P0130:"The front oxygen sensor is reporting abnormal voltage. This sensor monitors exhaust gases to help the ECU adjust the air/fuel mixture. A faulty sensor causes poor fuel economy and may trigger a rich or lean condition.",
+    P0420:"The catalytic converter efficiency has dropped below the threshold. The rear O₂ sensor has detected insufficient conversion of exhaust gases. This is one of the most common check engine codes.",
+    P0335:"The crankshaft position sensor is not sending a valid signal. This sensor is critical — without it the ECU cannot determine piston position and the engine may not start or will run poorly.",
+    P0300:"A random misfire has been detected across multiple cylinders. This can be caused by bad spark plugs, ignition coils, fuel injectors, or a vacuum leak. Continued driving may damage the catalytic converter.",
+    P0100:"The mass airflow sensor signal is outside expected range. The MAF sensor measures incoming air volume to calculate fuel delivery. A dirty or failing MAF causes rough idle, hesitation, and poor performance.",
+    P0171:"The engine is running lean — too much air or too little fuel. Common causes include a vacuum leak, dirty MAF sensor, weak fuel pump, or clogged fuel injectors.",
+  };
+  return map[code] || `Fault code ${code} indicates a problem with the ${code.startsWith('P01') ? 'fuel/air metering' : code.startsWith('P03') ? 'ignition or misfire' : code.startsWith('P04') ? 'emissions system' : 'engine management'} system. Consult a service manual for this vehicle for exact specifications and repair procedures.`;
+}
+
+const LOCATION_DOTS = {
+  Engine_Block:         [52, 68], Crankshaft_Sensor: [60, 75],
+  Camshaft_Sensor:      [55, 65], Throttle_Body:     [50, 62],
+  MAF_Sensor:           [45, 60], Fuel_Injector:     [65, 70],
+  Catalytic_Converter:  [145, 80],O2_Sensor_Front:   [120, 78],
+  O2_Sensor_Rear:       [165, 80],EGR_Valve:         [70, 65],
+  Coolant_Temp_Sensor:  [68, 63],
+};
+
+function updateLocationDot(partName) {
+  const pos = LOCATION_DOTS[partName] || [120, 70];
+  const dot = document.getElementById('loc-dot');
+  dot.setAttribute('cx', pos[0]);
+  dot.setAttribute('cy', pos[1]);
+  dot.setAttribute('opacity', '1');
+  document.getElementById('loc-label').textContent = partName.replace(/_/g, ' ');
+}
+
+// ════════════════════════════════════════
+//  Demo inject buttons
+// ════════════════════════════════════════
+function buildInjectButtons() {
+  const grid = document.getElementById('inject-grid');
+  const codes = ['P0420','P0130','P0335','P0300','P0100','P0171','P0340','P0115'];
+  codes.forEach(code => {
+    const b = document.createElement('button');
+    b.className = 'inject-btn';
+    b.textContent = code;
+    b.onclick = async () => {
+      const r = await fetch(`/api/demo_inject/${code}`);
+      const d = await r.json();
+      if (d.status === 'injected') {
+        if (!activeDTCs.find(x => x.code === code)) {
+          activeDTCs.push(d.dtc);
+          updateDTCs(activeDTCs);
+        }
+        toast(`Injected ${code}`);
+      }
+    };
+    grid.appendChild(b);
+  });
+}
+
+// ════════════════════════════════════════
+//  Toast helper
+// ════════════════════════════════════════
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ════════════════════════════════════════
+//  Boot
+// ════════════════════════════════════════
+initThree();
+buildInjectButtons();
+</script>
+</body>
+</html>
