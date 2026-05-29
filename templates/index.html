@@ -6,9 +6,14 @@
 <title>OBD2 Diagnostic — 3D Engine View</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/three@0.160/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.160/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.160/examples/js/controls/OrbitControls.js"></script>
+<script type="importmap">
+  {                                                                                                                                     
+    "imports": {  
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160/examples/jsm/" 
+    }                                                                                                                                   
+  }  
+  </script>   
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -440,7 +445,11 @@
 
 <div id="toast"></div>
 
-<script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
 // ════════════════════════════════════════
 //  State
 // ════════════════════════════════════════
@@ -496,7 +505,7 @@ function initThree() {
   grid.position.y = -0.8;
   scene.add(grid);
 
-  controls = new THREE.OrbitControls(camera, canvas);
+  controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.minDistance = 1;
@@ -533,39 +542,53 @@ function buildProceduralEngine() {
   explodeOffsets = {};
 
   const group = new THREE.Group();
+  const loader = new GLTFLoader()
 
-  PARTS_DEF.forEach(def => {
-    const geo = new THREE.BoxGeometry(...def.size);
-    geo.translate(0, def.size[1] / 2, 0); // origin at bottom
+  // PARTS_DEF.forEach(def => {
+  //   const geo = new THREE.BoxGeometry(...def.size);
+  //   geo.translate(0, def.size[1] / 2, 0); // origin at bottom
 
-    // Bevel-like look with slight edge rounding via scale
-    const mat = new THREE.MeshStandardMaterial({
-      color: def.color,
-      metalness: 0.6,
-      roughness: 0.5,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(...def.pos);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.name = def.name;
-    mesh.userData = { label: def.label, basePos: [...def.pos] };
+  //   // Bevel-like look with slight edge rounding via scale
+  //   const mat = new THREE.MeshStandardMaterial({
+  //     color: def.color,
+  //     metalness: 0.6,
+  //     roughness: 0.5,
+  //   });
+  //   const mesh = new THREE.Mesh(geo, mat);
+  //   mesh.position.set(...def.pos);
+  //   mesh.castShadow = true;
+  //   mesh.receiveShadow = true;
+  //   mesh.name = def.name;
+  //   mesh.userData = { label: def.label, basePos: [...def.pos] };
 
-    // Edge lines
-    const edges = new THREE.EdgesGeometry(geo, 15);
-    const lineMat = new THREE.LineBasicMaterial({ color: 0x3a5570, linewidth: 1 });
-    const lines = new THREE.LineSegments(edges, lineMat);
-    mesh.add(lines);
+  //   // Edge lines
+  //   const edges = new THREE.EdgesGeometry(geo, 15);
+  //   const lineMat = new THREE.LineBasicMaterial({ color: 0x3a5570, linewidth: 1 });
+  //   const lines = new THREE.LineSegments(edges, lineMat);
+  //   mesh.add(lines);
 
-    group.add(mesh);
-    partMeshes[def.name] = mesh;
-    originalMaterials[def.name] = mat;
-    explodeOffsets[def.name] = [def.pos[0] * 0.8, def.pos[1] * 0.8, def.pos[2] * 0.8];
-  });
+  //   group.add(mesh);
+  //   partMeshes[def.name] = mesh;
+  //   originalMaterials[def.name] = mat;
+  //   explodeOffsets[def.name] = [def.pos[0] * 0.8, def.pos[1] * 0.8, def.pos[2] * 0.8];
+  // });
 
-  engineModel = group;
-  scene.add(group);
-  document.getElementById('loading').style.display = 'none';
+  // engineModel = group;
+  // scene.add(group);
+  // document.getElementById('loading').style.display = 'none';
+
+
+  loader.load('/static/models/2000_Honda_Civic_Type_R.glb',
+        function(gltf){
+          engineModel = gltf.scene;
+          scene.add(gltf.scene);
+          document.getElementById('loading').style.display = 'none';
+        },
+        undefined,
+        function(error){
+          console.error('GLB load error:', error);
+        }
+  );
 }
 
 // ════════════════════════════════════════
@@ -929,6 +952,17 @@ function toast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
 }
+
+// ════════════════════════════════════════
+//  Expose functions to HTML onclick handlers
+//  (ES modules are scoped, so onclick can't see them by default)
+// ════════════════════════════════════════
+window.connectCar = connectCar;
+window.clearDTCs = clearDTCs;
+window.resetCamera = resetCamera;
+window.toggleWireframe = toggleWireframe;
+window.toggleExplode = toggleExplode;
+window.showAll = showAll;
 
 // ════════════════════════════════════════
 //  Boot

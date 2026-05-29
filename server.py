@@ -93,7 +93,7 @@ REPAIR_INFO: dict[str, dict] = {
 # ── VIN model lookup ─────────────────────────────────────────────────────────
 MODEL_LIBRARY: dict[str, str] = {
     # key: "MAKE|MODEL|YEAR_DECADE"  value: glb filename (place in static/models/)
-    "default": "1975_PORSCHE_911.glb",
+    "default": "2000_Honda_Civic_Type_R",
 }
 
 def decode_vin(vin: str) -> dict:
